@@ -3,6 +3,7 @@ __author__ = 'p_cohen'
 ############################ Import packages ############################
 import pandas as pd
 from sklearn import preprocessing
+from sklearn.ensemble import RandomForestClassifier
 import json
 import os
 
@@ -34,13 +35,12 @@ def translate_file(data, word_map):
                 data[col][data[col] == key] = val
     return data
 
-def create_features(d_frame, string_feats):
+def encode_string_features(d_frame, string_feats):
     """
     This builds features for the Kaggle Japanese coupon comp
     :param data: dataframe
     :return: dataframe with features
     """
-    d_frame['loc_match'] = d_frame.PREF_NAME == d_frame.ken_name
     for feat in string_feats:
         nm = 'le_' + feat
         le = preprocessing.LabelEncoder()
@@ -64,18 +64,66 @@ for f in ['coupon_visit_test.csv',]: #os.listdir(RAW_PATH)
     except pd.parser.CParserError:
         continue
 
-# Merge files
+# initialize list of features
+Xfeats = []
+# Load files
 visit = pd.read_csv(CLEAN_PATH + 'coupon_visit_train.csv')
 list = pd.read_csv(CLEAN_PATH + 'coupon_list_train.csv')
 user = pd.read_csv(CLEAN_PATH + 'user_list.csv')
+test_list = pd.read_csv(CLEAN_PATH + 'coupon_list_test.csv')
 
+# Clean list
+list_string_feats = ['CAPSULE_TEXT', 'GENRE_NAME', 'large_area_name',
+                     'ken_name', 'small_area_name']
+list['is_train'] = 1
+test_list['is_train'] = 0
+all_list = pd.append(list, test_list, ignore_index=True)
+all_list = encode_string_features(all_list, list_string_feats)
+tmp = [Xfeats.append('le_' + x) for x in list_string_feats]
+
+# Clean user
+user_string_feats = ['REG_DATE', 'SEX_ID', 'AGE', 'WITHDRAW_DATE', 'PREF_NAME']
+user = encode_string_features(user, user_string_feats)
+tmp = [Xfeats.append('le_' + x) for x in user_string_feats]
+
+# Construct train
 train = pd.merge(visit, list, left_on="VIEW_COUPON_ID_hash",
                  right_on="COUPON_ID_hash")
 train = pd.merge(train, user, left_on="USER_ID_hash", right_on="USER_ID_hash")
 
+
+# clean test
+test_list['one'] = 1
+user['one'] = 1
+test = pd.merge(test_list, user, on='one')
+
+
 # Create features
-string_feats = [u'PAGE_SERIAL', u'USER_ID_hash', u'CAPSULE_TEXT', u'GENRE_NAME',
-                u'PRICE_RATE', u'CATALOG_PRICE', u'DISCOUNT_PRICE',
-                u'large_area_name', u'ken_name', u'small_area_name',
-                u'REG_DATE', u'SEX_ID', u'AGE', u'WITHDRAW_DATE', u'PREF_NAME']
-thingy = create_features(train, string_feats)
+string_feats = ['CAPSULE_TEXT', 'GENRE_NAME',
+                'large_area_name', 'ken_name', 'small_area_name',
+                'REG_DATE', 'SEX_ID', 'AGE', 'WITHDRAW_DATE', 'PREF_NAME']
+num_feats = ['PRICE_RATE', 'CATALOG_PRICE', 'DISCOUNT_PRICE', 'USABLE_DATE_MON',
+             'USABLE_DATE_TUE', 'USABLE_DATE_WED', 'USABLE_DATE_THU',
+             'USABLE_DATE_FRI', 'USABLE_DATE_SAT', 'USABLE_DATE_SUN',
+             'USABLE_DATE_HOLIDAY']
+
+
+# Append numeric feat lists
+tmp = [Xfeats.append(x) for x in num_feats] # Store None's in tmp
+# Clean features
+for feat in Xfeats:
+    train[feat] = train[feat].fillna(-1)
+
+forest = RandomForestClassifier(n_estimators=30, n_jobs=2)
+forest.fit(train[Xfeats], train.PURCHASE_FLG)
+outputs = pd.DataFrame({'feats': Xfeats,
+                        'weight': forest.feature_importances_})
+outputs = outputs.sort(columns='weight', ascending=False)
+print outputs
+
+
+test = create_features(test, string_feats)
+# Clean features
+for feat in Xfeats:
+    test[feat] = test[feat].fillna(-1)
+test["preds"] = forest.predict(test[Xfeats])
