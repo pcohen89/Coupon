@@ -47,6 +47,12 @@ def encode_string_features(d_frame, string_feats):
         d_frame[nm] = le.fit_transform(d_frame[feat])
     return d_frame
 
+def create_subm(d):
+    """
+    :param test: (dataframe) with every coupon predicted
+    :return: submission for coupon competition
+    """
+    d.groupby('')
 
 
 ############################ Execute ############################
@@ -77,7 +83,7 @@ list_string_feats = ['CAPSULE_TEXT', 'GENRE_NAME', 'large_area_name',
                      'ken_name', 'small_area_name']
 list['is_train'] = 1
 test_list['is_train'] = 0
-all_list = pd.append(list, test_list, ignore_index=True)
+all_list = list.append(test_list, ignore_index=True)
 all_list = encode_string_features(all_list, list_string_feats)
 tmp = [Xfeats.append('le_' + x) for x in list_string_feats]
 
@@ -87,16 +93,15 @@ user = encode_string_features(user, user_string_feats)
 tmp = [Xfeats.append('le_' + x) for x in user_string_feats]
 
 # Construct train
-train = pd.merge(visit, list, left_on="VIEW_COUPON_ID_hash",
-                 right_on="COUPON_ID_hash")
+train = pd.merge(visit, all_list[all_list.is_train == 1],
+                 left_on="VIEW_COUPON_ID_hash", right_on="COUPON_ID_hash")
 train = pd.merge(train, user, left_on="USER_ID_hash", right_on="USER_ID_hash")
 
-
-# clean test
-test_list['one'] = 1
+# construct test
+test = all_list[all_list.is_train == 0]
+test['one'] = 1
 user['one'] = 1
-test = pd.merge(test_list, user, on='one')
-
+test = pd.merge(test, user, on='one')
 
 # Create features
 string_feats = ['CAPSULE_TEXT', 'GENRE_NAME',
@@ -113,17 +118,14 @@ tmp = [Xfeats.append(x) for x in num_feats] # Store None's in tmp
 # Clean features
 for feat in Xfeats:
     train[feat] = train[feat].fillna(-1)
+    test[feat] = test[feat].fillna(-1)
 
-forest = RandomForestClassifier(n_estimators=30, n_jobs=2)
+forest = RandomForestClassifier(n_estimators=30, n_jobs=-1)
 forest.fit(train[Xfeats], train.PURCHASE_FLG)
 outputs = pd.DataFrame({'feats': Xfeats,
                         'weight': forest.feature_importances_})
 outputs = outputs.sort(columns='weight', ascending=False)
 print outputs
 
-
-test = create_features(test, string_feats)
-# Clean features
-for feat in Xfeats:
-    test[feat] = test[feat].fillna(-1)
-test["preds"] = forest.predict(test[Xfeats])
+# Predict into test
+test['preds'] = forest.predict(test[Xfeats])
