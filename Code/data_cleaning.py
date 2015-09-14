@@ -52,7 +52,11 @@ def create_subm(d):
     :param test: (dataframe) with every coupon predicted
     :return: submission for coupon competition
     """
-    d.groupby('')
+    preds = d[['USER_ID_hash', 'COUPON_ID_hash', 'preds']]
+    user_groups = preds.groupby('USER_ID_hash')
+    subm = user_groups.apply(lambda x: " ".join(x.COUPON_ID_hash.sort_index('preds')[-10:]))
+    return subm
+
 
 
 ############################ Execute ############################
